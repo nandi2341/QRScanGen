@@ -33,7 +33,7 @@ jobs:
       - name: Install dependencies
         run: |
           rm -f package-lock.json
-          npm install
+          npm install --include=optional
           chmod -R +x node_modules/.bin
 
       - name: Build Application
