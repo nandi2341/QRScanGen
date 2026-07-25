@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { CameraScanner } from './CameraScanner';
 import { FileImportScanner } from './FileImportScanner';
 import { BatchSessionControls } from './BatchSessionControls';
@@ -9,9 +9,9 @@ import { CodeFormat } from '../../types/database';
 export const ScannerPage: React.FC = () => {
   const { processScanResult, sessionScanCount } = useScannerStore();
 
-  const handleScanSuccess = async (rawContent: string, formatName?: string) => {
+  const handleScanSuccess = useCallback(async (rawContent: string, formatName?: string) => {
     await processScanResult(rawContent, (formatName as CodeFormat) || 'QR_CODE', 'CAMERA');
-  };
+  }, [processScanResult]);
 
   return (
     <div className="space-y-6 max-w-xl mx-auto">

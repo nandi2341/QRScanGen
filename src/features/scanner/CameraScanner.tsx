@@ -13,14 +13,23 @@ export const CameraScanner: React.FC<Props> = ({ onScanSuccess }) => {
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
 
+  // Keep callback ref updated so useEffect doesn't depend on callback identity
+  const onScanSuccessRef = useRef(onScanSuccess);
   useEffect(() => {
+    onScanSuccessRef.current = onScanSuccess;
+  }, [onScanSuccess]);
+
+  useEffect(() => {
+    let isMounted = true;
     let html5Qrcode: Html5Qrcode | null = null;
     const scannerId = 'qr-reader';
 
     const startScanner = async () => {
       try {
-        setIsInitializing(true);
-        setCameraError(null);
+        if (isMounted) {
+          setIsInitializing(true);
+          setCameraError(null);
+        }
         
         html5Qrcode = new Html5Qrcode(scannerId, {
           formatsToSupport: [
@@ -47,32 +56,44 @@ export const CameraScanner: React.FC<Props> = ({ onScanSuccess }) => {
           },
           (decodedText, decodedResult) => {
             const formatName = decodedResult?.result?.format?.formatName || 'QR_CODE';
-            onScanSuccess(decodedText, formatName);
+            if (onScanSuccessRef.current) {
+              onScanSuccessRef.current(decodedText, formatName);
+            }
           },
           () => {
             // Frame scan failure - ignore
           }
         );
 
-        setIsScanning(true);
-        setIsInitializing(false);
+        if (isMounted) {
+          setIsScanning(true);
+          setIsInitializing(false);
+        } else {
+          if (html5Qrcode.isScanning) {
+            await html5Qrcode.stop();
+          }
+        }
       } catch (err) {
-        setCameraError(err instanceof Error ? err.message : 'Camera access denied or unavailable.');
-        setIsInitializing(false);
-        setIsScanning(false);
+        if (isMounted) {
+          const message = err instanceof Error ? err.message : String(err || 'Camera access denied or unavailable.');
+          setCameraError(message);
+          setIsInitializing(false);
+          setIsScanning(false);
+        }
       }
     };
 
     startScanner();
 
     return () => {
+      isMounted = false;
       if (scannerRef.current && scannerRef.current.isScanning) {
         scannerRef.current.stop().catch(() => {}).finally(() => {
           setIsScanning(false);
         });
       }
     };
-  }, [facingMode, onScanSuccess, setIsScanning]);
+  }, [facingMode, setIsScanning]);
 
   const toggleCamera = () => {
     setFacingMode(facingMode === 'environment' ? 'user' : 'environment');
