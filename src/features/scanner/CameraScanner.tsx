@@ -13,8 +13,10 @@ export const CameraScanner: React.FC<Props> = ({ onScanSuccess }) => {
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
 
-  // Scan lock to prevent duplicate scans within 500ms cooldown window
+  // Scan lock to prevent duplicate scans within 1000ms (1 second) cooldown window
   const isScanLockedRef = useRef<boolean>(false);
+  const lastScannedContentRef = useRef<string | null>(null);
+  const lastScannedTimeRef = useRef<number>(0);
 
   // Keep callback ref updated so useEffect doesn't depend on callback identity
   const onScanSuccessRef = useRef(onScanSuccess);
@@ -58,13 +60,26 @@ export const CameraScanner: React.FC<Props> = ({ onScanSuccess }) => {
             aspectRatio: 1.0
           },
           async (decodedText, decodedResult) => {
+            const now = Date.now();
+
             // Step 1: Check lock status
             if (isScanLockedRef.current) return;
-            // Step 2: Lock scanner
+
+            // Step 2: Prevent duplicate scan of identical content within 2 seconds
+            if (
+              lastScannedContentRef.current === decodedText &&
+              now - lastScannedTimeRef.current < 2000
+            ) {
+              return;
+            }
+
+            // Step 3: Lock scanner & store scan timestamp
             isScanLockedRef.current = true;
+            lastScannedContentRef.current = decodedText;
+            lastScannedTimeRef.current = now;
 
             try {
-              // Step 3: Save scan result
+              // Step 4: Save scan result
               const formatName = decodedResult?.result?.format?.formatName || 'QR_CODE';
               if (onScanSuccessRef.current) {
                 await onScanSuccessRef.current(decodedText, formatName);
@@ -72,8 +87,8 @@ export const CameraScanner: React.FC<Props> = ({ onScanSuccess }) => {
             } catch (err) {
               console.error('Scan handling error:', err);
             } finally {
-              // Step 4: 500ms cooldown before unlocking
-              await new Promise((resolve) => setTimeout(resolve, 500));
+              // Step 5: 1000ms (1 second) cooldown before unlocking
+              await new Promise((resolve) => setTimeout(resolve, 1000));
               isScanLockedRef.current = false;
             }
           },

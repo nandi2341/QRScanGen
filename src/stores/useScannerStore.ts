@@ -21,6 +21,10 @@ interface ScannerStore {
   processScanResult: (rawContent: string, format?: CodeFormat, source?: 'CAMERA' | 'FILE_IMPORT') => Promise<{ success: boolean; log: ScanLog | null; message?: string }>;
 }
 
+let lastProcessedContent: string | null = null;
+let lastProcessedTime = 0;
+let isProcessingScanLock = false;
+
 export const useScannerStore = create<ScannerStore>((set, get) => ({
   isScanning: false,
   facingMode: 'environment',
@@ -36,52 +40,72 @@ export const useScannerStore = create<ScannerStore>((set, get) => ({
   closeSuccessModal: () => set({ showSuccessModal: false }),
 
   processScanResult: async (rawContent, format = 'QR_CODE', source = 'CAMERA') => {
-    const settings = useSettingsStore.getState();
+    const now = Date.now();
 
-    // Check duplicate policy
-    if (settings.duplicatePolicy === 'IGNORE_IN_SESSION') {
-      if (get().scanHistorySession.includes(rawContent)) {
-        return { success: false, log: null, message: 'Duplicate scan ignored per session policy.' };
-      }
+    // Deduplication check: ignore identical content scanned within 2 seconds
+    if (source === 'CAMERA' && rawContent === lastProcessedContent && now - lastProcessedTime < 2000) {
+      return { success: false, log: null, message: 'Duplicate scan suppressed.' };
     }
 
-    const parsedResult = SmartParser.parse(rawContent);
-
-    const newLog: Omit<ScanLog, 'id'> = {
-      rawContent,
-      format,
-      parsedType: parsedResult.type,
-      parsedData: parsedResult.details,
-      timestamp: Date.now(),
-      sessionName: settings.activeSessionName || 'Default',
-      tags: [parsedResult.type.toLowerCase()],
-      isFavorite: false,
-      source
-    };
-
-    const id = await ScanLogRepository.addLog(newLog);
-    const createdLog: ScanLog = { ...newLog, id };
-
-    // Audio & Vibration feedback
-    if (settings.soundEnabled) AudioBeepService.playBeep();
-    if (settings.vibrationEnabled) AudioBeepService.vibrate(150);
-
-    // Auto copy if enabled
-    if (settings.autoCopyOnScan && navigator.clipboard) {
-      try {
-        await navigator.clipboard.writeText(rawContent);
-      } catch {
-        // Clipboard optional
-      }
+    // Lock check: ignore concurrent execution
+    if (isProcessingScanLock) {
+      return { success: false, log: null, message: 'Scan already in progress.' };
     }
 
-    set(state => ({
-      lastScannedLog: createdLog,
-      showSuccessModal: true,
-      sessionScanCount: state.sessionScanCount + 1,
-      scanHistorySession: [...state.scanHistorySession, rawContent]
-    }));
+    isProcessingScanLock = true;
+    lastProcessedContent = rawContent;
+    lastProcessedTime = now;
 
-    return { success: true, log: createdLog };
+    try {
+      const settings = useSettingsStore.getState();
+
+      // Check duplicate policy
+      if (settings.duplicatePolicy === 'IGNORE_IN_SESSION') {
+        if (get().scanHistorySession.includes(rawContent)) {
+          return { success: false, log: null, message: 'Duplicate scan ignored per session policy.' };
+        }
+      }
+
+      const parsedResult = SmartParser.parse(rawContent);
+
+      const newLog: Omit<ScanLog, 'id'> = {
+        rawContent,
+        format,
+        parsedType: parsedResult.type,
+        parsedData: parsedResult.details,
+        timestamp: Date.now(),
+        sessionName: settings.activeSessionName || 'Default',
+        tags: [parsedResult.type.toLowerCase()],
+        isFavorite: false,
+        source
+      };
+
+      const id = await ScanLogRepository.addLog(newLog);
+      const createdLog: ScanLog = { ...newLog, id };
+
+      // Audio & Vibration feedback
+      if (settings.soundEnabled) AudioBeepService.playBeep();
+      if (settings.vibrationEnabled) AudioBeepService.vibrate(150);
+
+      // Auto copy if enabled
+      if (settings.autoCopyOnScan && navigator.clipboard) {
+        try {
+          await navigator.clipboard.writeText(rawContent);
+        } catch {
+          // Clipboard optional
+        }
+      }
+
+      set(state => ({
+        lastScannedLog: createdLog,
+        showSuccessModal: true,
+        sessionScanCount: state.sessionScanCount + 1,
+        scanHistorySession: [...state.scanHistorySession, rawContent]
+      }));
+
+      return { success: true, log: createdLog };
+    } finally {
+      isProcessingScanLock = false;
+    }
   }
 }));
