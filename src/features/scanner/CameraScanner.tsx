@@ -4,7 +4,7 @@ import { Camera, Flashlight, RefreshCw, AlertCircle } from 'lucide-react';
 import { useScannerStore } from '../../stores/useScannerStore';
 
 interface Props {
-  onScanSuccess: (decodedText: string, formatName?: string) => void;
+  onScanSuccess: (decodedText: string, formatName?: string) => void | Promise<void>;
 }
 
 export const CameraScanner: React.FC<Props> = ({ onScanSuccess }) => {
@@ -12,6 +12,9 @@ export const CameraScanner: React.FC<Props> = ({ onScanSuccess }) => {
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
+
+  // Scan lock to prevent duplicate scans within 500ms cooldown window
+  const isScanLockedRef = useRef<boolean>(false);
 
   // Keep callback ref updated so useEffect doesn't depend on callback identity
   const onScanSuccessRef = useRef(onScanSuccess);
@@ -54,10 +57,24 @@ export const CameraScanner: React.FC<Props> = ({ onScanSuccess }) => {
             qrbox: { width: 250, height: 250 },
             aspectRatio: 1.0
           },
-          (decodedText, decodedResult) => {
-            const formatName = decodedResult?.result?.format?.formatName || 'QR_CODE';
-            if (onScanSuccessRef.current) {
-              onScanSuccessRef.current(decodedText, formatName);
+          async (decodedText, decodedResult) => {
+            // Step 1: Check lock status
+            if (isScanLockedRef.current) return;
+            // Step 2: Lock scanner
+            isScanLockedRef.current = true;
+
+            try {
+              // Step 3: Save scan result
+              const formatName = decodedResult?.result?.format?.formatName || 'QR_CODE';
+              if (onScanSuccessRef.current) {
+                await onScanSuccessRef.current(decodedText, formatName);
+              }
+            } catch (err) {
+              console.error('Scan handling error:', err);
+            } finally {
+              // Step 4: 500ms cooldown before unlocking
+              await new Promise((resolve) => setTimeout(resolve, 500));
+              isScanLockedRef.current = false;
             }
           },
           () => {
@@ -87,6 +104,7 @@ export const CameraScanner: React.FC<Props> = ({ onScanSuccess }) => {
 
     return () => {
       isMounted = false;
+      isScanLockedRef.current = false;
       if (scannerRef.current && scannerRef.current.isScanning) {
         scannerRef.current.stop().catch(() => {}).finally(() => {
           setIsScanning(false);
