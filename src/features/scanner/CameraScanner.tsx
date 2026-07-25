@@ -13,10 +13,11 @@ export const CameraScanner: React.FC<Props> = ({ onScanSuccess }) => {
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
 
-  // Scan lock to prevent duplicate scans within 1000ms (1 second) cooldown window
+  // Scan lock & deduplication refs
   const isScanLockedRef = useRef<boolean>(false);
   const lastScannedContentRef = useRef<string | null>(null);
   const lastScannedTimeRef = useRef<number>(0);
+  const lastEmptyFrameTimeRef = useRef<number>(Date.now());
 
   // Keep callback ref updated so useEffect doesn't depend on callback identity
   const onScanSuccessRef = useRef(onScanSuccess);
@@ -62,18 +63,18 @@ export const CameraScanner: React.FC<Props> = ({ onScanSuccess }) => {
           async (decodedText, decodedResult) => {
             const now = Date.now();
 
-            // Step 1: Check lock status
+            // Step 1: Check lock status (1 second cooldown between any scans)
             if (isScanLockedRef.current) return;
 
-            // Step 2: Prevent duplicate scan of identical content within 2 seconds
+            // Step 2: Prevent duplicate scans of the SAME QR code while held in camera view (15s suppression)
             if (
               lastScannedContentRef.current === decodedText &&
-              now - lastScannedTimeRef.current < 2000
+              now - lastScannedTimeRef.current < 15000
             ) {
               return;
             }
 
-            // Step 3: Lock scanner & store scan timestamp
+            // Step 3: Lock scanner & store last scan metadata
             isScanLockedRef.current = true;
             lastScannedContentRef.current = decodedText;
             lastScannedTimeRef.current = now;
@@ -93,7 +94,13 @@ export const CameraScanner: React.FC<Props> = ({ onScanSuccess }) => {
             }
           },
           () => {
-            // Frame scan failure - ignore
+            // Frame scan failure - no QR in frame
+            const now = Date.now();
+            // If camera hasn't seen a QR code for 1.5 seconds, reset last scanned content
+            if (now - lastScannedTimeRef.current > 1500) {
+              lastScannedContentRef.current = null;
+            }
+            lastEmptyFrameTimeRef.current = now;
           }
         );
 

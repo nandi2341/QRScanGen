@@ -42,8 +42,8 @@ export const useScannerStore = create<ScannerStore>((set, get) => ({
   processScanResult: async (rawContent, format = 'QR_CODE', source = 'CAMERA') => {
     const now = Date.now();
 
-    // Deduplication check: ignore identical content scanned within 2 seconds
-    if (source === 'CAMERA' && rawContent === lastProcessedContent && now - lastProcessedTime < 2000) {
+    // Deduplication check: ignore identical content scanned within 15 seconds
+    if (source === 'CAMERA' && rawContent === lastProcessedContent && now - lastProcessedTime < 15000) {
       return { success: false, log: null, message: 'Duplicate scan suppressed.' };
     }
 
